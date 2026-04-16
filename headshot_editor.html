@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Stratum Headshot Editor</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: #0D1B2E;
+      font-family: 'Segoe UI', Arial, sans-serif;
+      color: white;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      min-height: 100vh;
+      padding: 40px 20px;
+    }
+    h1 { font-size: 22px; margin-bottom: 6px; letter-spacing: 1px; }
+    p  { font-size: 13px; color: #7a9abf; margin-bottom: 30px; }
+
+    #drop-zone {
+      width: 360px;
+      height: 200px;
+      border: 2px dashed #1BBEBE;
+      border-radius: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 15px;
+      color: #1BBEBE;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+    #drop-zone:hover, #drop-zone.drag-over {
+      background: rgba(27,190,190,0.08);
+    }
+    #file-input { display: none; }
+
+    #controls {
+      display: none;
+      flex-direction: column;
+      align-items: center;
+      gap: 14px;
+      margin-top: 28px;
+      width: 100%;
+      max-width: 700px;
+    }
+    .row {
+      display: flex;
+      gap: 20px;
+      align-items: flex-start;
+      flex-wrap: wrap;
+      justify-content: center;
+    }
+    .box {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 8px;
+    }
+    .label {
+      font-size: 12px;
+      color: #7a9abf;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+    }
+    canvas {
+      border-radius: 8px;
+      max-width: 300px;
+      max-height: 360px;
+    }
+
+    .slider-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 13px;
+      color: #aac;
+    }
+    input[type=range] { width: 140px; accent-color: #1BBEBE; }
+
+    button {
+      background: #1BBEBE;
+      color: #0D1B2E;
+      border: none;
+      border-radius: 8px;
+      padding: 12px 28px;
+      font-size: 15px;
+      font-weight: 700;
+      cursor: pointer;
+      letter-spacing: 0.5px;
+      transition: opacity 0.2s;
+    }
+    button:hover { opacity: 0.85; }
+  </style>
+</head>
+<body>
+
+  <h1>Stratum Headshot Editor</h1>
+  <p>Replaces your grey background with Stratum navy &amp; enhances the photo</p>
+
+  <div id="drop-zone" onclick="document.getElementById('file-input').click()">
+    Drop your headshot here, or click to browse
+  </div>
+  <input type="file" id="file-input" accept="image/*">
+
+  <div id="controls">
+    <div class="slider-row">
+      <span>Tolerance:</span>
+      <input type="range" id="tolerance" min="10" max="100" value="38">
+      <span id="tol-val">38</span>
+    </div>
+
+    <div class="row">
+      <div class="box">
+        <span class="label">Original</span>
+        <canvas id="canvas-orig"></canvas>
+      </div>
+      <div class="box">
+        <span class="label">Enhanced</span>
+        <canvas id="canvas-result"></canvas>
+      </div>
+    </div>
+
+    <button onclick="download()">Download Enhanced Headshot</button>
+  </div>
+
+  <canvas id="canvas-work" style="display:none"></canvas>
+
+  <script>
+    const NAVY = [13, 27, 46];
+
+    const dropZone  = document.getElementById('drop-zone');
+    const fileInput = document.getElementById('file-input');
+    const controls  = document.getElementById('controls');
+    const tolSlider = document.getElementById('tolerance');
+    const tolVal    = document.getElementById('tol-val');
+    const cOrig     = document.getElementById('canvas-orig');
+    const cResult   = document.getElementById('canvas-result');
+    const cWork     = document.getElementById('canvas-work');
+
+    let originalImage = null;
+
+    dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('drag-over'); });
+    dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
+    dropZone.addEventListener('drop', e => {
+      e.preventDefault();
+      dropZone.classList.remove('drag-over');
+      loadFile(e.dataTransfer.files[0]);
+    });
+    fileInput.addEventListener('change', e => loadFile(e.target.files[0]));
+    tolSlider.addEventListener('input', () => {
+      tolVal.textContent = tolSlider.value;
+      if (originalImage) process();
+    });
+
+    function loadFile(file) {
+      if (!file || !file.type.startsWith('image/')) return;
+      const reader = new FileReader();
+      reader.onload = e => {
+        const img = new Image();
+        img.onload = () => {
+          originalImage = img;
+          cOrig.width  = img.width;
+          cOrig.height = img.height;
+          cOrig.getContext('2d').drawImage(img, 0, 0);
+          controls.style.display = 'flex';
+          process();
+        };
+        img.src = e.target.result;
+      };
+      reader.readAsDataURL(file);
+    }
+
+    function process() {
+      const img = originalImage;
+      cWork.width  = img.width;
+      cWork.height = img.height;
+      const ctx = cWork.getContext('2d');
+      ctx.drawImage(img, 0, 0);
+
+      const data = ctx.getImageData(0, 0, cWork.width, cWork.height);
+      const px   = data.data;
+      const tol  = parseInt(tolSlider.value);
+
+      const bgR = px[0], bgG = px[1], bgB = px[2];
+
+      for (let i = 0; i < px.length; i += 4) {
+        const r = px[i], g = px[i+1], b = px[i+2];
+        const dist = Math.sqrt(
+          (r - bgR)**2 + (g - bgG)**2 + (b - bgB)**2
+        );
+        if (dist < tol) {
+          px[i]   = NAVY[0];
+          px[i+1] = NAVY[1];
+          px[i+2] = NAVY[2];
+        }
+      }
+
+      ctx.putImageData(data, 0, 0);
+
+      cResult.width  = img.width;
+      cResult.height = img.height;
+      const rCtx = cResult.getContext('2d');
+      rCtx.filter = 'brightness(1.06) contrast(1.12) saturate(1.1)';
+      rCtx.drawImage(cWork, 0, 0);
+    }
+
+    function download() {
+      const link = document.createElement('a');
+      link.download = 'headshot_enhanced.png';
+      link.href = cResult.toDataURL('image/png');
+      link.click();
+    }
+  </script>
+</body>
+</html>
